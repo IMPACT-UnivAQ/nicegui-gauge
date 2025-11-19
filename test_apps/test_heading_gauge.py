@@ -10,7 +10,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nicegui import ui
-from gauge_svg_full import GaugeSVGFull
+from gauge import GaugeSVGFull
 
 
 class HeadingGaugeTest:

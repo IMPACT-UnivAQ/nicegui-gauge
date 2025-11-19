@@ -1,4 +1,4 @@
-# StoCAV Gauge - SVG Complete Programmed Gauge for NiceGUI
+# NiceGUI Gauge - SVG Gauge Widget
 
 Pacchetto Python per gauges grafici SVG completi programmati in Python/NiceGUI. Implementazione Python-only senza dipendenze JavaScript.
 
@@ -7,13 +7,13 @@ Pacchetto Python per gauges grafici SVG completi programmati in Python/NiceGUI. 
 ### Da GitHub (Repository Separato)
 
 ```bash
-pip install git+https://github.com/IMPACT/stocav-gauge.git
+pip install git+https://github.com/IMPACT-UnivAQ/nicegui-gauge.git
 ```
 
 ### Da Repository Locale (Sviluppo)
 
 ```bash
-pip install -e /path/to/stocav-gauge
+pip install -e /path/to/nicegui-gauge
 ```
 
 Oppure, se sei nella directory del pacchetto:

@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stocav-gauge"
+name = "gauge"
 version = "0.1.0"
 description = "SVG Complete Programmed Gauge widgets for NiceGUI - Python-only implementation without JavaScript dependencies"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 authors = [
-    {name = "StoCAV Team"}
+    {name = "IMPACT_UnivAQ Team"}
 ]
 keywords = ["nicegui", "gauge", "svg", "dashboard", "widget"]
 classifiers = [
@@ -38,13 +38,13 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/IMPACT/stocav-gauge"
-Repository = "https://github.com/IMPACT/stocav-gauge"
-Issues = "https://github.com/IMPACT/stocav-gauge/issues"
+Homepage = "https://github.com/IMPACT-UnivAQ/nicegui-gauge"
+Repository = "https://github.com/IMPACT-UnivAQ/nicegui-gauge"
+Issues = "https://github.com/IMPACT-UnivAQ/nicegui-gauge/issues"
 
 [tool.setuptools]
-packages = {find = {}}
+packages = ["gauge"]
 
 [tool.setuptools.package-data]
-"*" = ["assets/*.png"]
+"gauge" = ["assets/*.png"]
 
