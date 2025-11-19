@@ -43,8 +43,8 @@ Repository = "https://github.com/IMPACT/stocav-gauge"
 Issues = "https://github.com/IMPACT/stocav-gauge/issues"
 
 [tool.setuptools]
-packages = ["gauge"]
+packages = {find = {}}
 
 [tool.setuptools.package-data]
-gauge = ["assets/*.png"]
+"*" = ["assets/*.png"]
 
