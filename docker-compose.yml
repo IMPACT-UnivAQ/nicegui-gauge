@@ -1,0 +1,28 @@
+# Docker Compose for Gauge Test Environment
+# Dedicated environment for testing and refining gauge widgets
+# Port 8080, no HTTPS
+
+version: '3.8'
+
+services:
+  gauge-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gauge_test_dev
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount entire directory for hot-reload during development
+      # All source files are mounted from host, not copied into image
+      # Changes to source files are immediately available in container
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+    # Default command - can be overridden:
+    # docker-compose run gauge-test python3 test_apps/test_speed_gauge.py
+    # docker-compose run gauge-test python3 test_apps/test_heading_gauge.py
+    # docker-compose run gauge-test python3 test_apps/test_both_gauges.py
+    command: python3 test_apps/test_speed_gauge.py
+

@@ -1,0 +1,7 @@
+include README.md
+include LICENSE
+include requirements.txt
+include pyproject.toml
+recursive-include gauge/assets *.png
+recursive-include test_apps *.py
+
