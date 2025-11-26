@@ -5,7 +5,7 @@ Minigui for testing and refining speed gauge visualization
 
 import sys
 import os
-
+import random
 # Add parent directory to path to import gauge module
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,7 +21,10 @@ class SpeedGaugeTest:
         self.auto_update_timer = None
         self.auto_update_active = False
         self.current_value = 0.0
-        
+        self.manual_mode = False
+        self.sensor_enabled=False
+        self.sensor_timer=None
+        self.timer_enable=False  
     def create_ui(self):
         """Create test UI"""
         ui.page_title('Speed Gauge Test')
@@ -71,7 +74,15 @@ class SpeedGaugeTest:
                     value=0,
                     step=0.1
                 ).classes('w-full mb-4')
+                #self.slider.disabled=True
                 self.slider.on_value_change(self._on_slider_change)
+                self.slider.disable()
+                #checkbox
+                
+                ui.checkbox('Enable slider',value=False,on_change=self._toggle_slider)
+                self.sensor_cb=ui.checkbox('Enable Sensor', value=False,on_change=self.update_gauge_state)
+                self.sensor_cb.disable()  
+                self.timer_cb=ui.checkbox('Enable Timer',value=False,on_change=self.update_gauge_state)
                 
                 # Manual value input
                 with ui.row().classes('w-full items-center gap-2'):
@@ -126,7 +137,22 @@ class SpeedGaugeTest:
             # Fallback: try to get value from slider directly
             value = self.slider.value
         self._set_value(float(value))
+        if not self.manual_mode:
+            return  # Ignore slider changes if manual mode is disabled
     
+        value = e.value
+
+    def _toggle_slider(self,e):
+        self.manual_mode =e.value
+        if self.manual_mode:
+        # Enable manual control
+            self.slider.enable()
+            print("✅ Manual control ENABLED - Slider is active")
+        else:
+        # Disable manual control  
+            self.slider.disable()
+            print("🔵 Manual control DISABLED - Slider is locked")
+
     def _on_input_change(self, e):
         """Handle input change"""
         # Extract value from event object
@@ -141,7 +167,41 @@ class SpeedGaugeTest:
             self._set_value(float(value))
             # Sync slider
             self.slider.value = float(value)
-    
+    def update_gauge_state(self, e=None):
+        self.sensor_enabled = self.sensor_cb.value
+        if not self.timer_cb.value:
+            print("✅ Sensor is not available")
+            self.sensor_cb.disable()
+            self.sensor_cb.value = False
+            self.sensor_enabled = False
+
+            if self.sensor_timer:
+
+                self.sensor_timer.deactivate()
+            self._set_value(0)  # reset gauge
+            return
+        #self.sensor_cb.enable()
+        if self.timer_cb :
+            self.sensor_cb.enable()
+            print("✅ Sensor Checkbox is active")
+            if self.sensor_timer:
+                self.sensor_timer.activate()
+        if self.timer_cb.value and self.sensor_cb.value:
+        # create timer if it doesn't exist
+            if not hasattr(self, 'sensor_timer') or self.sensor_timer is None:
+                
+                def update_sensor():
+                    if self.sensor_cb.value:
+                        value = random.uniform(0, 100)
+                        self._set_value(value)
+                self.sensor_timer = ui.timer(0.1, update_sensor, active=True)
+            else:
+                self.sensor_timer.activate()
+        else:
+            print("🔵 Sensor Checkbox is not active")
+            if self.sensor_timer:
+                self.sensor_timer.deactivate()
+ 
     def _set_value(self, value: float):
         """Set gauge value"""
         self.current_value = max(0, min(100, value))
@@ -159,22 +219,30 @@ class SpeedGaugeTest:
                 self.auto_update_timer.deactivate()
             self.auto_update_active = False
             self.auto_update_btn.text = 'Start Auto Update'
+
+        
+
         else:
             # Start auto update
             self.auto_update_active = True
             self.auto_update_btn.text = 'Stop Auto Update'
-            
+        
             def update_value():
                 if self.auto_update_active:
                     # Simulate speed changes (0-100 km/h)
                     import math
                     import time
                     t = time.time()
+                                           
                     # Sinusoidal variation
                     value = 50 + 40 * math.sin(t * 0.5)
-                    self._set_value(value)
-            
+
+                    
+                elif self.sensor_enabled: 
+                     value=self.update_sensor()
+                self._set_value(value)    
             self.auto_update_timer = ui.timer(0.1, update_value, active=True)
+            
     
     def _reset(self):
         """Reset gauge to 0"""
