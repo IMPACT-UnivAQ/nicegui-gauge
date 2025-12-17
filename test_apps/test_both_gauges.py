@@ -58,6 +58,7 @@ class BothGaugesTest:
                         size=220,
                         needle_color='#000000',
                         needle_length=0.75,
+                        angle_map=[(20, 180), (50, 90), (80, 0)],
                         show_value=True,
                         show_ticks=True,
                         tick_count=12

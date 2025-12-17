@@ -6,7 +6,7 @@ Python-only implementation without JavaScript dependencies
 import base64
 import os
 import math
-from typing import Optional
+from typing import Optional, List, Tuple
 from nicegui import ui
 
 
@@ -31,7 +31,11 @@ class GaugeSVGFull:
         needle_length: float = 0.75,  # Needle length (0.0-1.0 of radius)
         show_value: bool = True,  # Show numeric value
         show_ticks: bool = True,  # Show tick marks
-        tick_count: Optional[int] = None  # Number of tick marks (None -> sensible default)
+        tick_count: Optional[int] = None,  # Number of tick marks (None -> sensible default)
+        angle_map: Optional[List[Tuple[float, float]]] = None,
+        angle_center: Optional[float] = None,
+        angle_span: Optional[float] = None,
+        counter_clockwise: bool = False
     ):
         """
         Initialize gauge
@@ -72,6 +76,31 @@ class GaugeSVGFull:
         else:
             self._tick_count = tick_count
         self._background_image = background_image
+        # Optional advanced angle mapping
+       #self._counter_clockwise = bool(counter_clockwise)
+       #self._angle_center = angle_center
+       #self._angle_span = angle_span
+
+        if angle_map:
+            self._angle_map = sorted(angle_map, key=lambda t: t[0])
+        else:
+            self._angle_map = None
+
+        # If angle_span provided and no explicit map, build symmetric mapping
+        if self._angle_map is None and (self._angle_span is not None):
+            half = float(self._angle_span) / 2.0
+            if self._angle_center is not None:
+                self._angle_map = [
+                    (self._min, -half),
+                    (self._angle_center, 0.0),
+                    (self._max, half),
+                ]
+            else:
+                self._angle_map = [
+                    (self._min, -half),
+                    (self._max, half),
+                ]
+            self._angle_map = sorted(self._angle_map, key=lambda t: t[0])
         
         # Calculate gauge parameters
         self._center_x = size // 2
@@ -100,6 +129,11 @@ class GaugeSVGFull:
                 img_data = f.read()
                 self._background_base64 = base64.b64encode(img_data).decode('utf-8')
         
+        # Automatically enable colored zones for common speed gauges (0-100)
+        # If the caller wants to control this explicitly, they can set
+        # `self._colored_zones` after construction.
+        self._colored_zones = (self._min == 0 and self._max == 100)
+
         # Create UI container
         self.container = self._create_gauge_container()
     
@@ -113,13 +147,46 @@ class GaugeSVGFull:
         Returns:
             Angle in degrees
         """
-        # Normalize value to 0-1 range
+        # If an explicit piecewise angle_map is provided, use linear interpolation
+        if getattr(self, '_angle_map', None):
+            m = self._angle_map
+            # If only one point provided, return its angle
+            if len(m) == 1:
+                return float(m[0][1])
+
+            # below first point -> extrapolate using first segment
+            if value <= m[0][0]:
+                x0, y0 = m[0]
+                x1, y1 = m[1]
+                if x1 == x0:
+                    return float(y0)
+                t = (value - x0) / (x1 - x0)
+                return float(y0 + t * (y1 - y0))
+
+            # above last point -> extrapolate using last segment
+            if value >= m[-1][0]:
+                x0, y0 = m[-2]
+                x1, y1 = m[-1]
+                if x1 == x0:
+                    return float(y1)
+                t = (value - x0) / (x1 - x0)
+                return float(y0 + t * (y1 - y0))
+
+            # find segment containing value
+            for i in range(len(m) - 1):
+                x0, y0 = m[i]
+                x1, y1 = m[i + 1]
+                if x0 <= value <= x1:
+                    if x1 == x0:
+                        return float(y0)
+                    t = (value - x0) / (x1 - x0)
+                    return float(y0 + t * (y1 - y0))
+
+        # Default behavior: Normalize value to 0-1 range and map to start+range
         normalized = (value - self._min) / (self._max - self._min)
-        
-        # Calculate angle
-        angle = self._start_angle + (normalized * self._angle_range)
-        
-        return angle
+        angle_range = self._angle_range * (-1 if self._counter_clockwise else 1)
+        angle = self._start_angle + (normalized * angle_range)
+        return float(angle)
     
     def _generate_needle_svg(self, angle: float) -> str:
         """
@@ -187,9 +254,110 @@ class GaugeSVGFull:
         
         ticks_svg = []
         
+        # If an explicit angle_map is provided, draw ticks only at those map points
+        # that fall within the numeric range [min, max]. Also add minor ticks
+        # between consecutive mapped major ticks (9 minor ticks between majors).
+        if getattr(self, '_angle_map', None):
+            # Keep only mapped values inside the numeric range
+            majors = [pt[0] for pt in self._angle_map if (self._min <= pt[0] <= self._max)]
+            majors = sorted(set(majors))
+
+            # If after filtering there are no mapped points inside range, don't draw any ticks
+            if not majors:
+                return ''
+
+            # Parameters for minor ticks
+            minor_between = 9  # number of minor ticks between each pair of major ticks
+
+            seen_angles = set()
+
+            for idx, value in enumerate(majors):
+                angle = self._calculate_angle(value)
+
+                # Deduplicate by angle
+                ang_key = round(float(angle), 6)
+                if ang_key in seen_angles:
+                    continue
+                seen_angles.add(ang_key)
+
+                # Major tick positions
+                inner_radius = self._radius - 10
+                outer_radius = self._radius
+
+                if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+                    rad = math.radians(angle)
+                    x1 = self._center_x + inner_radius * math.cos(rad)
+                    y1 = self._center_y - inner_radius * math.sin(rad)
+                    x2 = self._center_x + outer_radius * math.cos(rad)
+                    y2 = self._center_y - outer_radius * math.sin(rad)
+                    angle_rad = rad
+                else:
+                    angle_rad = math.radians(angle - 90)
+                    x1 = self._center_x + inner_radius * math.cos(angle_rad)
+                    y1 = self._center_y + inner_radius * math.sin(angle_rad)
+                    x2 = self._center_x + outer_radius * math.cos(angle_rad)
+                    y2 = self._center_y + outer_radius * math.sin(angle_rad)
+
+                ticks_svg.append(
+                    f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
+                    f'stroke="#333" stroke-width="1"/>'
+                )
+
+                # Label for major tick
+                label_radius = self._radius - 25
+                label_font = 10
+                label_x = self._center_x + label_radius * math.cos(angle_rad)
+                if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+                    label_y = self._center_y - label_radius * math.sin(angle_rad)
+                else:
+                    label_y = self._center_y + label_radius * math.sin(angle_rad)
+
+                ticks_svg.append(
+                    f'<text x="{label_x}" y="{label_y}" '
+                    f'text-anchor="middle" dominant-baseline="middle" '
+                    f'font-size="{label_font}" font-weight="300" fill="#333" font-family="Arial, sans-serif">'
+                    f'{value:.0f}</text>'
+                )
+
+                # Generate minor ticks between this major and the next major
+                if idx < len(majors) - 1:
+                    v0 = value
+                    v1 = majors[idx + 1]
+                    for j in range(1, minor_between + 1):
+                        t = j / (minor_between + 1)
+                        v_minor = v0 + t * (v1 - v0)
+                        a_minor = self._calculate_angle(v_minor)
+                        ang_key_m = round(float(a_minor), 6)
+                        if ang_key_m in seen_angles:
+                            continue
+                        seen_angles.add(ang_key_m)
+
+                        inner_minor = self._radius - 6
+                        outer_minor = self._radius
+
+                        if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+                            rad_m = math.radians(a_minor)
+                            mx1 = self._center_x + inner_minor * math.cos(rad_m)
+                            my1 = self._center_y - inner_minor * math.sin(rad_m)
+                            mx2 = self._center_x + outer_minor * math.cos(rad_m)
+                            my2 = self._center_y - outer_minor * math.sin(rad_m)
+                        else:
+                            rad_m = math.radians(a_minor - 90)
+                            mx1 = self._center_x + inner_minor * math.cos(rad_m)
+                            my1 = self._center_y + inner_minor * math.sin(rad_m)
+                            mx2 = self._center_x + outer_minor * math.cos(rad_m)
+                            my2 = self._center_y + outer_minor * math.sin(rad_m)
+
+                        ticks_svg.append(
+                            f'<line x1="{mx1}" y1="{my1}" x2="{mx2}" y2="{my2}" '
+                            f'stroke="#666" stroke-width="0.8"/>'
+                        )
+
+            return '\n'.join(ticks_svg)
+
         # Special-case: for semicircular heading gauges spanning 0..360,
         # generate ticks every 30° (0,30,...,360) to ensure correct placement
-        if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+        elif self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
             tick_values = [self._min + i * 30 for i in range(0, 13)]
             iter_ticks = [(i, v) for i, v in enumerate(tick_values)]
             total_divs = 12
@@ -206,7 +374,22 @@ class GaugeSVGFull:
                 value = tick_val
                 normalized = (value - self._min) / (self._max - self._min)
 
-            angle = self._start_angle + (normalized * self._angle_range)
+            # Determine angle using mapping if present
+            angle = self._calculate_angle(value)
+
+            # Skip ticks for values outside numeric range (guard against
+            # mapped points that accidentally lie outside [min,max]).
+            if value < self._min or value > self._max:
+                continue
+
+            # Deduplicate ticks that land on the same angle (avoid mapped
+            # tick drawing on top of default tick). Use rounded angle key.
+            if 'seen_angles' not in locals():
+                seen_angles = set()
+            ang_key = round(float(angle), 6)
+            if ang_key in seen_angles:
+                continue
+            seen_angles.add(ang_key)
 
             # Calculate tick positions. For semicircular 0..360 gauges use
             # conventional polar coordinates (0° = right, CCW positive).
@@ -234,9 +417,9 @@ class GaugeSVGFull:
             )
             
             # Decide label interval so we show a reasonable number of labels
-            # (aim for ~13 labels across the gauge). Compute label_step such
-            # that for large tick_count we don't crowd labels.
-            label_step = max(1, round(self._tick_count / 12))
+            # (aim for ~13 labels across the gauge). Use `total_divs` so that
+            # custom angle_map sizes are respected.
+            label_step = max(1, round(total_divs / 12))
 
             # Decide whether to show label for this tick
             if i % label_step == 0 or i == 0 or i == total_divs:
@@ -259,11 +442,64 @@ class GaugeSVGFull:
                 ticks_svg.append(
                     f'<text x="{label_x}" y="{label_y}" '
                     f'text-anchor="middle" dominant-baseline="middle" '
-                    f'font-size="{label_font}" fill="#333" font-family="Arial, sans-serif">'
+                    f'font-size="{label_font}" font-weight="300" fill="#333" font-family="Arial, sans-serif">'
                     f'{value:.0f}</text>'
                 )
         
         return '\n'.join(ticks_svg)
+
+    def _generate_colored_zones(self) -> str:
+        """
+        Generate colored arc segments (zones) for speed-style gauges.
+
+        Returns:
+            SVG string for colored arc segments
+        """
+        if not self._colored_zones:
+            return ''
+
+        # Define zones as (start_value, end_value, color)
+        zones = [
+            (0.9, 30,'#2ecc71'),
+            (31, 50, '#f1c40f'),
+            (51, 90, "#f96a0b"),
+            (91, 99, "#d51d08"),
+        ]
+
+        parts = []
+
+        # Stroke thickness for zone band
+        stroke_w = 12
+
+        for start_v, end_v, color in zones:
+            # Use _calculate_angle so colored zones follow any provided angle_map
+            a0 = self._calculate_angle(start_v)
+            a1 = self._calculate_angle(end_v)
+
+            # Convert to radians for path coords. Use same convention as tick marks
+            # which uses angle_rad = radians(angle - 90)
+            r = self._radius
+            angle0 = math.radians(a0 - 90)
+            angle1 = math.radians(a1 - 90)
+
+            x0 = self._center_x + r * math.cos(angle0)
+            y0 = self._center_y + r * math.sin(angle0)
+            x1 = self._center_x + r * math.cos(angle1)
+            y1 = self._center_y + r * math.sin(angle1)
+
+            # Determine large-arc-flag based on angular span
+            span_deg = (a1 - a0)
+            large_arc = '1' if abs(span_deg) > 180 else '0'
+
+            # Sweep flag: SVG arc uses 0 = CCW, 1 = CW when using standard coords.
+            sweep = '1' if span_deg > 0 else '0'
+
+            parts.append(
+                f'<path d="M {x0} {y0} A {r} {r} 0 {large_arc} {sweep} {x1} {y1}" '
+                f'stroke="{color}" stroke-width="{stroke_w}" fill="none" stroke-linecap="round"/>'
+            )
+
+        return '\n'.join(parts)
     
     def _generate_svg(self, angle: float) -> str:
         """
@@ -314,7 +550,52 @@ class GaugeSVGFull:
                     f'fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>'
                 )
         
-        # Add tick marks
+        # Add colored zones (if enabled) and tick marks
+        zones_svg = ''
+        if self._colored_zones:
+            zones_svg = self._generate_colored_zones()
+        if zones_svg:
+            svg_parts.append(f'<g id="{self._id}_zones">{zones_svg}</g>')
+
+        # If the caller provided an angle_map, draw a solid arc connecting the
+        # major mapped tick positions to form a frame for the displayed range.
+        if getattr(self, '_angle_map', None):
+            majors = [pt[0] for pt in self._angle_map if (self._min <= pt[0] <= self._max)]
+            majors = sorted(set(majors))
+            if majors:
+                arc_radius = self._radius + 6
+                arc_w = 2
+                # Draw a smooth circular arc between the first and last major
+                # tick using the same convention as colored zones.
+                a0 = self._calculate_angle(majors[0])
+                a1 = self._calculate_angle(majors[-1])
+
+                if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+                    angle0 = math.radians(a0)
+                    angle1 = math.radians(a1)
+                    x0 = self._center_x + arc_radius * math.cos(angle0)
+                    y0 = self._center_y - arc_radius * math.sin(angle0)
+                    x1 = self._center_x + arc_radius * math.cos(angle1)
+                    y1 = self._center_y - arc_radius * math.sin(angle1)
+                else:
+                    angle0 = math.radians(a0 - 90)
+                    angle1 = math.radians(a1 - 90)
+                    x0 = self._center_x + arc_radius * math.cos(angle0)
+                    y0 = self._center_y + arc_radius * math.sin(angle0)
+                    x1 = self._center_x + arc_radius * math.cos(angle1)
+                    y1 = self._center_y + arc_radius * math.sin(angle1)
+
+                span_deg = (a1 - a0)
+                large_arc = '1' if abs(span_deg) > 180 else '0'
+                sweep = '1' if span_deg > 0 else '0'
+
+                path_d = f'M {x0} {y0} A {arc_radius} {arc_radius} 0 {large_arc} {sweep} {x1} {y1}'
+
+                svg_parts.append(
+                    f'<path d="{path_d}" stroke="#333" stroke-width="{arc_w}" '
+                    f'fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+                )
+
         if self._show_ticks:
             svg_parts.append(f'<g id="{self._id}_ticks">{self._generate_tick_marks()}</g>')
         
@@ -353,7 +634,7 @@ class GaugeSVGFull:
                  style="width: {self._size}px; height: {self._container_height}px; 
                         text-align: center; display: inline-block;">
                 {svg_content}
-                <div style="margin-top: 5px; font-size: 14px; font-weight: bold; color: #333;">
+                <div style="margin-top: 5px; font-size: 14px; font-weight: 400; color: #333;">
                     {self._label}
                 </div>
             </div>

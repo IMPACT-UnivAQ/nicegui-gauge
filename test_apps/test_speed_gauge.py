@@ -45,19 +45,21 @@ class SpeedGaugeTest:
                 if not os.path.exists(bg_path):
                     bg_path = None
                 
+                # Disable background image to ensure only mapped SVG ticks are shown
                 self.gauge = GaugeSVGFull(
                     value=0,
                     min_value=0,
                     max_value=100,
                     label='EGO Speed',
                     gauge_type='circular',
-                    background_image=bg_path,
+                    background_image=None,
                     size=220,
                     needle_color='#000000',
                     needle_length=0.75,
                     show_value=True,
                     show_ticks=True,
-                    tick_count=12
+                    tick_count=10,
+                    angle_map=[(0, -145), (10, -118), (20,-90), (30, -64), (40, -37), (50,0), (60, 37), (70, 64), (80,90), (90, 118), (100, 145)]
                 )
             
             # Controls
