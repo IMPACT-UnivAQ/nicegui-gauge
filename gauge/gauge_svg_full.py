@@ -31,7 +31,7 @@ class GaugeSVGFull:
         needle_length: float = 0.75,  # Needle length (0.0-1.0 of radius)
         show_value: bool = True,  # Show numeric value
         show_ticks: bool = True,  # Show tick marks
-        tick_count: int = 10  # Number of tick marks
+        tick_count: Optional[int] = None  # Number of tick marks (None -> sensible default)
     ):
         """
         Initialize gauge
@@ -61,7 +61,16 @@ class GaugeSVGFull:
         self._needle_length = needle_length
         self._show_value = show_value
         self._show_ticks = show_ticks
-        self._tick_count = tick_count
+        # Choose a sensible default number of divisions when not provided:
+        # - semicircular: 12 segments -> 13 tick marks (0..360 every 30°)
+        # - circular: 10 segments by default
+        if tick_count is None:
+            if gauge_type == 'semicircular':
+                self._tick_count = 12
+            else:
+                self._tick_count = 10
+        else:
+            self._tick_count = tick_count
         self._background_image = background_image
         
         # Calculate gauge parameters
@@ -75,8 +84,13 @@ class GaugeSVGFull:
             self._angle_range = 360
             self._container_height = size + 30  # Extra space for label
         else:  # semicircular
+            # Map numeric range across the semicircle so values go left->top->right.
+            # Use a negative angle range so that:
+            #   0   -> 180 (left),
+            #   180 -> 90  (top),
+            #   360 -> 0   (right)
             self._start_angle = 180  # Start from left
-            self._angle_range = 180
+            self._angle_range = -180
             self._container_height = size // 2 + 30
         
         # Load background image as base64 if provided
@@ -119,24 +133,45 @@ class GaugeSVGFull:
         """
         # Calculate needle end point
         needle_radius = self._radius * self._needle_length
-        angle_rad = math.radians(angle - 90)  # SVG uses 0 degrees at top
-        
-        end_x = self._center_x + needle_radius * math.cos(angle_rad)
-        end_y = self._center_y + needle_radius * math.sin(angle_rad)
-        
-        # Create needle as line with circle at center
-        needle_svg = f'''
-            <g id="{self._id}_needle" transform="rotate({angle}, {self._center_x}, {self._center_y})">
-                <line x1="{self._center_x}" y1="{self._center_y}" 
-                      x2="{self._center_x}" y2="{self._center_y - needle_radius}"
-                      stroke="{self._needle_color}" 
-                      stroke-width="3" 
-                      stroke-linecap="round"/>
-                <circle cx="{self._center_x}" cy="{self._center_y}" 
-                        r="5" 
-                        fill="{self._needle_color}"/>
-            </g>
-        '''
+
+        # For semicircular heading gauges spanning 0..360, use standard
+        # polar coordinates with 0°=right, positive CCW, and invert Y
+        if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+            # angle is already computed so that 0->180, 180->90, 360->0
+            rad = math.radians(angle)
+            end_x = self._center_x + needle_radius * math.cos(rad)
+            end_y = self._center_y - needle_radius * math.sin(rad)
+
+            needle_svg = f'''
+                <g id="{self._id}_needle">
+                    <line x1="{self._center_x}" y1="{self._center_y}" 
+                          x2="{end_x}" y2="{end_y}"
+                          stroke="{self._needle_color}" 
+                          stroke-width="4" 
+                          stroke-linecap="round"/>
+                    <circle cx="{self._center_x}" cy="{self._center_y}" 
+                            r="6" 
+                            fill="{self._needle_color}"/>
+                </g>
+            '''
+        else:
+            # Default behavior (keeps previous rotation-based drawing)
+            angle_rad = math.radians(angle - 90)  # SVG uses 0 degrees at top
+            end_x = self._center_x + needle_radius * math.cos(angle_rad)
+            end_y = self._center_y + needle_radius * math.sin(angle_rad)
+
+            needle_svg = f'''
+                <g id="{self._id}_needle" transform="rotate({angle}, {self._center_x}, {self._center_y})">
+                    <line x1="{self._center_x}" y1="{self._center_y}" 
+                          x2="{self._center_x}" y2="{self._center_y - needle_radius}"
+                          stroke="{self._needle_color}" 
+                          stroke-width="4" 
+                          stroke-linecap="round"/>
+                    <circle cx="{self._center_x}" cy="{self._center_y}" 
+                            r="6" 
+                            fill="{self._needle_color}"/>
+                </g>
+            '''
         
         return needle_svg
     
@@ -152,37 +187,79 @@ class GaugeSVGFull:
         
         ticks_svg = []
         
-        for i in range(self._tick_count + 1):
+        # Special-case: for semicircular heading gauges spanning 0..360,
+        # generate ticks every 30° (0,30,...,360) to ensure correct placement
+        if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+            tick_values = [self._min + i * 30 for i in range(0, 13)]
+            iter_ticks = [(i, v) for i, v in enumerate(tick_values)]
+            total_divs = 12
+        else:
+            iter_ticks = [(i, None) for i in range(self._tick_count + 1)]
+            total_divs = self._tick_count
+
+        for i, tick_val in iter_ticks:
             # Calculate angle for this tick
-            normalized = i / self._tick_count
+            if tick_val is None:
+                normalized = i / total_divs
+                value = self._min + (normalized * (self._max - self._min))
+            else:
+                value = tick_val
+                normalized = (value - self._min) / (self._max - self._min)
+
             angle = self._start_angle + (normalized * self._angle_range)
-            angle_rad = math.radians(angle - 90)
-            
-            # Calculate tick positions
+
+            # Calculate tick positions. For semicircular 0..360 gauges use
+            # conventional polar coordinates (0° = right, CCW positive).
             inner_radius = self._radius - 10
             outer_radius = self._radius
-            
-            x1 = self._center_x + inner_radius * math.cos(angle_rad)
-            y1 = self._center_y + inner_radius * math.sin(angle_rad)
-            x2 = self._center_x + outer_radius * math.cos(angle_rad)
-            y2 = self._center_y + outer_radius * math.sin(angle_rad)
+
+            if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+                # angle is already mapped (180..0), interpret as standard angle
+                rad = math.radians(angle)
+                x1 = self._center_x + inner_radius * math.cos(rad)
+                y1 = self._center_y - inner_radius * math.sin(rad)
+                x2 = self._center_x + outer_radius * math.cos(rad)
+                y2 = self._center_y - outer_radius * math.sin(rad)
+                angle_rad = rad
+            else:
+                angle_rad = math.radians(angle - 90)
+                x1 = self._center_x + inner_radius * math.cos(angle_rad)
+                y1 = self._center_y + inner_radius * math.sin(angle_rad)
+                x2 = self._center_x + outer_radius * math.cos(angle_rad)
+                y2 = self._center_y + outer_radius * math.sin(angle_rad)
             
             ticks_svg.append(
                 f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
                 f'stroke="#333" stroke-width="1"/>'
             )
             
-            # Add value labels for major ticks
-            if i % (self._tick_count // 5) == 0 or i == 0 or i == self._tick_count:
-                value = self._min + (normalized * (self._max - self._min))
-                label_radius = self._radius - 25
+            # Decide label interval so we show a reasonable number of labels
+            # (aim for ~13 labels across the gauge). Compute label_step such
+            # that for large tick_count we don't crowd labels.
+            label_step = max(1, round(self._tick_count / 12))
+
+            # Decide whether to show label for this tick
+            if i % label_step == 0 or i == 0 or i == total_divs:
+                # Place labels outside the outer arc for semicircular 0..360 gauges
+                if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+                    label_radius = self._radius + 12
+                    label_font = 11
+                else:
+                    label_radius = self._radius - 25
+                    label_font = 10
+
+                # For semicircular heading gauge we already computed angle_rad
                 label_x = self._center_x + label_radius * math.cos(angle_rad)
-                label_y = self._center_y + label_radius * math.sin(angle_rad)
-                
+                # Use inverted Y for semicircular polar math when applicable
+                if self._gauge_type == 'semicircular' and (self._max - self._min) == 360:
+                    label_y = self._center_y - label_radius * math.sin(angle_rad)
+                else:
+                    label_y = self._center_y + label_radius * math.sin(angle_rad)
+
                 ticks_svg.append(
                     f'<text x="{label_x}" y="{label_y}" '
                     f'text-anchor="middle" dominant-baseline="middle" '
-                    f'font-size="10" fill="#333" font-family="Arial, sans-serif">'
+                    f'font-size="{label_font}" fill="#333" font-family="Arial, sans-serif">'
                     f'{value:.0f}</text>'
                 )
         

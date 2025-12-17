@@ -86,7 +86,7 @@ class BothGaugesTest:
                         needle_length=0.75,
                         show_value=True,
                         show_ticks=True,
-                        tick_count=9
+                        tick_count=12
                     )
             
             # Controls
