@@ -77,9 +77,9 @@ class GaugeSVGFull:
             self._tick_count = tick_count
         self._background_image = background_image
         # Optional advanced angle mapping
-       #self._counter_clockwise = bool(counter_clockwise)
-       #self._angle_center = angle_center
-       #self._angle_span = angle_span
+        self._counter_clockwise = bool(counter_clockwise)
+        self._angle_center = angle_center
+        self._angle_span = angle_span
 
         if angle_map:
             self._angle_map = sorted(angle_map, key=lambda t: t[0])
